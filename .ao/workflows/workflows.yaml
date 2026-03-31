@@ -1,0 +1,47 @@
+default_workflow_ref: quarterly-engagement-pipeline
+
+workflows:
+  # ─── Main: Full Quarterly Pipeline ───────────────────────────────
+  - id: quarterly-engagement-pipeline
+    name: "Quarterly Alumni Engagement Pipeline"
+    description: "Full quarterly run: ingest alumni data, segment, score, identify donors, generate outreach, review, and report"
+    phases:
+      - ingest-alumni-data
+      - segment-alumni
+      - score-engagement
+      - identify-donors
+      - generate-outreach
+      - review-outputs:
+          on_verdict:
+            rework:
+              target: ingest-alumni-data
+            approved:
+              target: build-event-invitation-list
+          max_rework_attempts: 2
+      - build-event-invitation-list
+      - generate-reports
+      - vp-advancement-review
+    post_success:
+      merge:
+        strategy: squash
+        target_branch: main
+        create_pr: true
+        auto_merge: false
+        cleanup_worktree: true
+
+  # ─── Lightweight: Monthly Score Refresh ──────────────────────────
+  - id: monthly-score-refresh
+    name: "Monthly Engagement Score Refresh"
+    description: "Recalculates engagement scores for all alumni and flags status changes for immediate action"
+    phases:
+      - refresh-engagement-scores
+      - generate-reports
+
+  # ─── Lightweight: Outreach Generation Only ───────────────────────
+  - id: outreach-campaign
+    name: "Outreach Campaign Generator"
+    description: "Generates personalized outreach templates for all segments without re-running the full pipeline"
+    phases:
+      - generate-outreach
+      - build-event-invitation-list
+      - vp-advancement-review

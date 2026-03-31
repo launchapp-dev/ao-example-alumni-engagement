@@ -1,0 +1,21 @@
+schedules:
+  # Full quarterly engagement pipeline — runs 1st day of each quarter at 6am
+  - id: quarterly-pipeline
+    cron: "0 6 1 1,4,7,10 *"
+    workflow_ref: quarterly-engagement-pipeline
+    enabled: true
+    description: "Full quarterly alumni engagement pipeline — ingest, segment, score, identify donors, generate outreach, report"
+
+  # Monthly engagement score refresh — 1st of each month at 7am
+  - id: monthly-score-refresh
+    cron: "0 7 1 * *"
+    workflow_ref: monthly-score-refresh
+    enabled: true
+    description: "Recalculate engagement scores, detect status changes, flag newly lapsed/lost alumni"
+
+  # Weekly outreach campaign generation — every Monday at 8am
+  - id: weekly-outreach
+    cron: "0 8 * * 1"
+    workflow_ref: outreach-campaign
+    enabled: false
+    description: "Generate outreach templates for current week's campaigns (disabled by default — enable during active campaign periods)"

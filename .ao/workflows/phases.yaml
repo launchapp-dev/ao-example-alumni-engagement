@@ -1,0 +1,357 @@
+phases:
+  # ─── Data Ingestion ───────────────────────────────────────────────
+  ingest-alumni-data:
+    mode: agent
+    agent: data-ingester
+    directive: |
+      Ingest and normalize the alumni dataset for this batch run.
+
+      1. Read all CSV files from data/alumni-exports/ (use glob: data/alumni-exports/*.csv)
+      2. If no CSVs exist, read data/sample/alumni-sample.csv as the input
+      3. Normalize all records to the canonical schema:
+         { id, first_name, last_name, email, graduation_year, degree_type, major,
+           employer, job_title, city, state, country, phone, last_donation_date,
+           total_giving, event_count, volunteer_hours, email_opens_last_year }
+      4. Deduplicate by (email, graduation_year) — keep most recently updated record
+      5. Write cleaned profiles to output/profiles/ as {alumni_id}.json
+      6. Write data/alumni-master.json as the consolidated record
+      7. Write output/ingestion-summary.json with:
+         { total_records, duplicates_removed, records_with_missing_email,
+           records_with_missing_year, data_quality_score, processed_at }
+
+      Output the path to alumni-master.json when complete.
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - alumni_master_path
+        - total_records
+        - data_quality_score
+
+  # ─── Segmentation ─────────────────────────────────────────────────
+  segment-alumni:
+    mode: agent
+    agent: segmentation-engine
+    directive: |
+      Segment all alumni from data/alumni-master.json into strategic cohorts.
+
+      Read data/alumni-master.json and apply the full segmentation model:
+
+      TEMPORAL segments (based on graduation_year vs current year):
+        - recent: 0-5 years since graduation
+        - early_career: 6-15 years
+        - mid_career: 16-25 years
+        - senior: 26+ years
+
+      DEGREE segments: undergraduate, graduate, professional, phd
+      (map: BA/BS/AB → undergraduate; MA/MS/MEd/MPH → graduate; MBA/JD/MD → professional; PhD/EdD/DSc → phd)
+
+      ENGAGEMENT segments (from last activity date):
+        - highly_engaged: activity within 6 months
+        - active: activity within 18 months
+        - lapsed: 18 months - 3 years
+        - lost: 3+ years no engagement
+
+      For each segment, write output/segments/{segment_key}.json:
+        { segment_key, segment_label, dimension, member_ids: [], count, priority (1-5),
+          engagement_strategy, recommended_outreach_channels }
+
+      Write output/segments/segment-summary.json listing all segments with counts.
+      Store segment assignments in memory under key "alumni_segments_{date}".
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - segment_count
+        - total_alumni_segmented
+
+  # ─── Engagement Scoring ───────────────────────────────────────────
+  score-engagement:
+    mode: agent
+    agent: engagement-scorer
+    directive: |
+      Calculate engagement scores for all alumni using the weighted scoring model.
+
+      Read each profile from output/profiles/ and compute:
+
+      score_components:
+        donation_score: (recency × 0.4 + frequency × 0.3 + amount_tier × 0.3) × 35
+          - recency: 1.0 if donated last year, 0.7 if 2 yrs, 0.4 if 3 yrs, 0.1 if 4+ yrs
+          - frequency: normalize against cohort median
+          - amount_tier: 1-5 scale ($1-99=1, $100-499=2, $500-1999=3, $2K-9999=4, $10K+=5)
+        event_score: (events attended / 5, capped at 1.0) × 25
+        volunteer_score: (volunteer_hours / 20, capped at 1.0) × 20
+        digital_score: (email_opens_last_year / 10, capped at 1.0) × 15
+        network_score: static 0.5 if employer known, else 0.0 × 5
+
+      total_score = sum of all components (0-100)
+
+      engagement_status mapping:
+        80-100 → highly_engaged
+        60-79  → active
+        40-59  → warm
+        20-39  → lapsed
+        0-19   → lost
+
+      Write output/scores/{alumni_id}_score.json for each alumnus.
+      Write output/scores/score-summary.json with distribution histogram and top 100 list.
+      Flag alumni in top 20% (score >= 80) for donor identification phase.
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - scored_count
+        - mean_score
+        - highly_engaged_count
+        - top_tier_alumni_ids
+
+  # ─── Donor Identification ─────────────────────────────────────────
+  identify-donors:
+    mode: agent
+    agent: donor-identifier
+    directive: |
+      Identify and tier high-potential donors from the scored alumni pool.
+
+      Read output/scores/score-summary.json for the top-tier alumni list.
+      Read individual score files from output/scores/ for each flagged alumnus.
+      Read their profile from output/profiles/ for employment and giving history.
+
+      Apply the donor tiering model:
+        Major Gift (MG): total_score >= 70 AND total_giving >= 5000 AND employer known
+        Mid-Level (ML): total_score >= 55 AND total_giving >= 500
+        Annual Fund (AF): total_score >= 40 AND email known
+        Steward Only (SO): donated >= $10K in the last 18 months (in cooldown)
+
+      For each prospect, write output/prospects/{alumni_id}_prospect.json:
+        { alumni_id, donor_tier, engagement_score, total_giving, capacity_estimate,
+          affinity_score (0-10), recommended_ask_amount, preferred_channel,
+          assigned_officer, last_contact_date, notes, steward_only_reason }
+
+      capacity_estimate heuristics:
+        - If total_giving > $50K: estimate $500K+ capacity
+        - If total_giving $10K-$50K: estimate $100K-$500K
+        - If total_giving $1K-$10K: estimate $10K-$100K
+        - If total_giving < $1K: estimate $1K-$10K
+
+      Write output/prospects/prospect-list.json (ranked by composite score).
+      Write output/prospects/top-25-major-gifts.md — a formatted brief for VP Advancement.
+      Write output/prospects/reunion-upgrade-targets.json — reunion-year alumni with giving potential.
+
+      Use sequential-thinking to reason through edge cases (board members, current parents).
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - major_gift_count
+        - mid_level_count
+        - annual_fund_count
+        - top_prospect_id
+
+  # ─── Outreach Generation ─────────────────────────────────────────
+  generate-outreach:
+    mode: agent
+    agent: outreach-writer
+    directive: |
+      Generate personalized outreach templates for each active alumni segment.
+
+      Read output/segments/segment-summary.json to get all segment keys.
+      Read each segment file from output/segments/ for strategy guidance.
+      Read memory key "alumni_segments_{date}" for context.
+
+      For each segment, produce the following templates:
+
+      1. REUNION INVITATION (for segments where reunion year is approaching):
+         - File: output/outreach/{segment}_reunion_invitation.html
+         - Warm, celebratory tone; emphasize shared memories and class legacy
+         - CTA: Register for reunion weekend
+
+      2. LAPSED RE-ENGAGEMENT (for lapsed/lost segments only):
+         - File: output/outreach/{segment}_reactivation_email.html
+         - Acknowledge the gap warmly; share what's new at the institution
+         - CTA: Update your profile / attend a local event
+
+      3. ANNUAL FUND ASK (for active/highly_engaged segments):
+         - File: output/outreach/{segment}_annual_fund.html
+         - Lead with impact story; match ask amount to segment capacity
+         - CTA: Make a gift today
+
+      4. VOLUNTEER RECRUITMENT (for highly_engaged + mid_career/senior):
+         - File: output/outreach/{segment}_volunteer_ask.html
+         - Peer appeal; emphasize giving back and staying connected
+         - CTA: Join the mentoring program
+
+      Each HTML file must include:
+        - Subject line as HTML comment at top: <!-- SUBJECT: ... -->
+        - Personalization tokens: {{first_name}}, {{class_year}}, {{degree}}
+        - Plain-text alternative in a <!-- PLAINTEXT: ... --> block at bottom
+
+      Write output/outreach/template-index.json mapping segments to their template files.
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - templates_created
+        - segments_covered
+
+  # ─── Quality Review Gate ─────────────────────────────────────────
+  review-outputs:
+    mode: agent
+    agent: report-generator
+    directive: |
+      Review all generated outputs for completeness and quality before reporting.
+
+      Check the following:
+      1. output/profiles/ — at least 1 profile exists and has required fields
+      2. output/segments/segment-summary.json — exists and has at least 3 segments
+      3. output/scores/score-summary.json — exists and has scored_count > 0
+      4. output/prospects/prospect-list.json — exists and has at least 1 prospect
+      5. output/outreach/template-index.json — exists and maps at least 2 segments
+
+      If ANY critical output is missing or empty, return verdict: rework
+      with a clear explanation of what's missing.
+
+      If all outputs pass, return verdict: approved
+    capabilities:
+      mutates_state: false
+      writes_files: false
+    decision_contract:
+      required_fields:
+        - verdict
+        - reasoning
+        - outputs_checked
+        - missing_outputs
+
+  # ─── Report Generation ───────────────────────────────────────────
+  generate-reports:
+    mode: agent
+    agent: report-generator
+    directive: |
+      Produce the full suite of engagement reports from this batch run.
+
+      Read all outputs from:
+        - output/segments/segment-summary.json
+        - output/scores/score-summary.json
+        - output/prospects/prospect-list.json
+        - output/outreach/template-index.json
+
+      Generate these reports (write to output/reports/):
+
+      1. YYYY-MM-DD_quarterly-engagement-dashboard.md
+         - Segment health table (segment, count, avg_score, trend)
+         - Top 5 insights from this batch
+         - Engagement distribution histogram (ASCII bar chart)
+         - Alumni at risk of going lost (score 20-39, declining trend)
+
+      2. YYYY-MM-DD_fundraising-pipeline.md
+         - Prospect counts by tier (MG/ML/AF/SO)
+         - Projected annual revenue by tier (use avg ask × count × 20% conversion)
+         - Top 10 prospects table (name redacted → just ID + tier + score)
+         - Reunion giving targets for upcoming 5/10/25/50 year classes
+
+      3. YYYY-MM-DD_outreach-readiness.md
+         - Templates ready by segment
+         - Recommended send schedule (which segments to activate this week)
+         - Estimated reach (# of alumni per campaign)
+
+      Use current date (from filesystem or memory) for file naming.
+      Write output/reports/reports-index.json with paths and descriptions.
+
+      Print a concise summary of key metrics at the end.
+    capabilities:
+      mutates_state: true
+      writes_files: true
+    output_contract:
+      required_fields:
+        - reports_generated
+        - key_metrics
+
+  # ─── Score Refresh (scheduled) ───────────────────────────────────
+  refresh-engagement-scores:
+    mode: agent
+    agent: engagement-scorer
+    directive: |
+      Perform a monthly refresh of engagement scores across all alumni.
+
+      Read data/alumni-master.json for current records.
+      Read existing scores from output/scores/ to compute score_trend.
+
+      For each alumnus:
+        - Recalculate score using current weights
+        - Compare to previous score: improvement if +5 or more, declining if -5 or more
+        - Update output/scores/{alumni_id}_score.json with new score + trend
+        - Append to output/scores/{alumni_id}_score_history.jsonl (one line per run)
+
+      Write output/scores/monthly-score-refresh-YYYY-MM.json with:
+        { run_date, total_scored, improved_count, declined_count, unchanged_count,
+          mean_score_change, newly_highly_engaged: [], newly_lapsed: [], newly_lost: [] }
+
+      Flag newly_lapsed and newly_lost for immediate re-engagement outreach dispatch.
+    capabilities:
+      mutates_state: true
+      writes_files: true
+
+  # ─── Prepare Invitation List (command) ───────────────────────────
+  build-event-invitation-list:
+    mode: command
+    command:
+      program: python3
+      args:
+        - "-c"
+        - |
+          import json, os, glob
+          from datetime import datetime
+
+          prospects_path = 'output/prospects/prospect-list.json'
+          segments_path = 'output/segments/segment-summary.json'
+
+          prospects = []
+          if os.path.exists(prospects_path):
+              with open(prospects_path) as f:
+                  prospects = json.load(f)
+
+          segments = {}
+          if os.path.exists(segments_path):
+              with open(segments_path) as f:
+                  segments = json.load(f)
+
+          # Build invitation list: highly_engaged + major gift prospects
+          invite_list = []
+          for p in prospects[:50]:  # top 50 prospects always invited
+              invite_list.append({
+                  'alumni_id': p.get('alumni_id'),
+                  'donor_tier': p.get('donor_tier'),
+                  'invite_priority': 'VIP' if p.get('donor_tier') == 'MG' else 'Priority',
+                  'channel': p.get('preferred_channel', 'email')
+              })
+
+          os.makedirs('output/events', exist_ok=True)
+          out_path = f'output/events/invitation-list-{datetime.now().strftime("%Y-%m-%d")}.json'
+          with open(out_path, 'w') as f:
+              json.dump({'generated_at': datetime.now().isoformat(),
+                         'total_invitees': len(invite_list),
+                         'invitees': invite_list}, f, indent=2)
+          print(f'Invitation list written: {out_path} ({len(invite_list)} invitees)')
+      cwd_mode: project_root
+      timeout_secs: 60
+
+  # ─── Manual: VP Advancement Review ──────────────────────────────
+  vp-advancement-review:
+    mode: manual
+    directive: |
+      The quarterly engagement pipeline has completed. Please review:
+
+      1. output/reports/ — quarterly reports are ready for your review
+      2. output/prospects/top-25-major-gifts.md — top prospect brief
+      3. output/outreach/ — review outreach templates before activating campaigns
+
+      Action required:
+      - Approve or reject the top-25 major gift prospect list
+      - Confirm outreach campaign schedule
+      - Assign development officers to major gift prospects
+
+      Respond with APPROVED to proceed with outreach activation, or REVISE with feedback.

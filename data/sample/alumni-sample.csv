@@ -1,0 +1,16 @@
+id,first_name,last_name,email,graduation_year,degree_type,major,employer,job_title,city,state,country,phone,last_donation_date,total_giving,event_count,volunteer_hours,email_opens_last_year
+A001,Sarah,Chen,sarah.chen@example.com,2005,BS,Computer Science,Google,Senior Engineer,San Francisco,CA,USA,4155550001,2024-11-15,12500,8,24,18
+A002,Marcus,Williams,marcus.williams@example.com,1995,MBA,Business Administration,Accenture,Managing Director,Chicago,IL,USA,3125550002,2023-06-01,45000,12,40,6
+A003,Emily,Rodriguez,emily.rodriguez@example.com,2019,BA,Political Science,,Graduate Student,Boston,MA,USA,6175550003,2024-01-10,250,2,0,22
+A004,James,Park,james.park@example.com,1985,PhD,Biochemistry,BioPharm Inc,Chief Scientific Officer,San Diego,CA,USA,6195550004,2024-09-30,125000,5,10,4
+A005,Lisa,Thompson,lisa.thompson@example.com,2012,MS,Environmental Science,EPA,Senior Policy Analyst,Washington,DC,USA,2025550005,2022-03-15,1800,3,16,11
+A006,David,Nguyen,david.nguyen@example.com,2001,BA,History,,,Austin,TX,USA,5125550006,,0,0,0,0
+A007,Rachel,Kim,rachel.kim@example.com,2015,JD,Law,Morrison & Foerster,Associate,New York,NY,USA,2125550007,2024-12-01,5000,6,8,14
+A008,Thomas,Brown,thomas.brown@example.com,1978,BS,Mechanical Engineering,Retired,,Naples,FL,USA,2395550008,2024-05-20,200000,4,5,3
+A009,Amanda,Foster,amanda.foster@example.com,2020,BA,Psychology,Salesforce,Sales Representative,Denver,CO,USA,3035550009,2024-03-22,100,1,2,30
+A010,Robert,Martinez,robert.martinez@example.com,1992,MD,Medicine,Mayo Clinic,Physician,Rochester,MN,USA,5075550010,2023-12-10,15000,7,20,8
+A011,Jennifer,Walsh,jennifer.walsh@example.com,2008,MPH,Public Health,CDC,Epidemiologist,Atlanta,GA,USA,4045550011,2024-07-04,3200,9,35,20
+A012,Kevin,O'Brien,kevin.obrien@example.com,1999,BS,Finance,Goldman Sachs,Vice President,New York,NY,USA,2125550012,2024-10-15,8500,4,12,7
+A013,Priya,Sharma,priya.sharma@example.com,2017,MS,Data Science,Netflix,Data Scientist,Los Gatos,CA,USA,4085550013,2024-02-28,1500,3,6,25
+A014,Christopher,Lee,christopher.lee@example.com,1968,BA,English,Self-employed,Author,Portland,OR,USA,5035550014,2021-06-01,500,1,0,2
+A015,Michelle,Davis,michelle.davis@example.com,2003,BS,Nursing,Johns Hopkins,Nurse Practitioner,Baltimore,MD,USA,4105550015,2024-08-19,4000,5,28,16
